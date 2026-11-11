@@ -8,3 +8,4 @@
 /campaigns/
 __pycache__/
 *.pyc
+/dist/

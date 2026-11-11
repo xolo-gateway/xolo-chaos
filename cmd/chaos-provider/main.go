@@ -14,6 +14,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -25,7 +26,15 @@ import (
 	"github.com/xolo-gateway/xolo-chaos/internal/chaos"
 )
 
+// version is set at build time by the release workflow:
+// -ldflags "-X main.version=v1.2.3".
+var version = "dev"
+
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-version") {
+		fmt.Println("chaos-provider", version)
+		return
+	}
 	if err := run(); err != nil {
 		slog.Error("chaos-provider failed", slog.Any("error", err))
 		os.Exit(1)
@@ -70,7 +79,7 @@ func run() error {
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
-	slog.Info("chaos-provider listening", slog.String("addr", addr), slog.Int64("seed", seed), slog.Int("profiles", len(profiles)))
+	slog.Info("chaos-provider listening", slog.String("version", version), slog.String("addr", addr), slog.Int64("seed", seed), slog.Int("profiles", len(profiles)))
 
 	select {
 	case err := <-errCh:

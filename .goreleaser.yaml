@@ -1,0 +1,71 @@
+version: 2
+
+# Releases chaos-provider alone: archives for Linux, macOS and Windows, and a
+# multi-architecture image. The chaos-monkey plugin is not released: it
+# builds against a Xolo checkout (see the README).
+
+builds:
+  - id: chaos-provider
+    dir: .
+    main: ./cmd/chaos-provider
+    binary: chaos-provider
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: chaos-provider
+    ids: [chaos-provider]
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "chaos-provider_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - src: docs/chaos-provider.md
+        dst: README.md
+
+checksum:
+  name_template: checksums.txt
+
+dockers_v2:
+  - id: chaos-provider
+    ids: [chaos-provider]
+    dockerfile: deploy/release.Dockerfile
+    images:
+      - "ghcr.io/{{ tolower .Env.REPO_OWNER }}/chaos-provider"
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    labels:
+      org.opencontainers.image.title: chaos-provider
+      org.opencontainers.image.description: OpenAI-compatible LLM provider that injects faults on purpose
+      org.opencontainers.image.source: "{{ .GitURL }}"
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.licenses: Apache-2.0
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+release:
+  name_template: "v{{ .Version }}"

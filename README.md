@@ -12,6 +12,7 @@ internal/chaos/       fault profiles, random distributions, filler text
 plugins/chaos-monkey/ Xolo plugin that injects faults into the plugin subsystem
 k6/                   load scripts and their shared library
 deploy/               Compose stack, load balancer, Prometheus, SQL setup
+docs/                 guide of chaos-provider used on its own
 Makefile              build, seed, start the stack, run the scripts
 ```
 
@@ -20,6 +21,11 @@ Makefile              build, seed, start the stack, run the scripts
 An OpenAI-compatible server (`POST /v1/chat/completions`, `GET /v1/models`)
 that misbehaves on purpose. Xolo registers it as an `openai` provider. The
 model name selects a fault profile, so `chaos-slow` uses the `slow` profile.
+
+chaos-provider does not depend on Xolo. Each release publishes its binary for
+Linux, macOS and Windows, and the image `ghcr.io/xolo-gateway/chaos-provider`.
+[docs/chaos-provider.md](docs/chaos-provider.md) explains how to use it with
+any OpenAI client, and is the README of the release archives.
 
 | Profile | Behaviour |
 |---|---|
