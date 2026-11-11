@@ -1,0 +1,143 @@
+# Load and chaos test bench for Xolo.
+#
+#   make seed            # starts PostgreSQL and generates the dataset in it
+#   make up              # the whole stack, one Xolo instance
+#   make up REPLICAS=3   # three instances behind the load balancer
+#   make run-nominal     # a k6 campaign
+#
+# Load balancer: http://localhost:3002   (the one k6 queries)
+# Provider     : http://localhost:9090   (/admin/profiles, /metrics)
+# Prometheus   : http://localhost:9091
+# PostgreSQL   : localhost:55432         (xolo/xolo, PG_PORT to change it)
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: xolo
+      POSTGRES_PASSWORD: xolo
+      POSTGRES_DB: xolo
+      # The dataset is disposable: durability is traded for throughput, so
+      # that the database is not the bottleneck of the campaign.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    command:
+      - postgres
+      - -c
+      - fsync=off
+      - -c
+      - synchronous_commit=off
+      - -c
+      - full_page_writes=off
+      - -c
+      - max_connections=300
+      - -c
+      - shared_buffers=256MB
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      # Host port shifted by default: a local PostgreSQL often holds 5432.
+      - "${PG_PORT:-55432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xolo -d xolo"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  chaos-provider:
+    build:
+      context: ../..
+      dockerfile: xolo-chaos/deploy/chaos-provider.Dockerfile
+    image: xolo-chaos/provider:dev
+    environment:
+      CHAOS_ADDR: ":9090"
+      CHAOS_SEED: "${CHAOS_SEED:-20260914}"
+      CHAOS_LOG_LEVEL: "${CHAOS_LOG_LEVEL:-info}"
+    ports:
+      - "9090:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/healthz"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+
+  xolo:
+    build:
+      context: ../..
+      dockerfile: xolo-chaos/deploy/xolo.Dockerfile
+    image: xolo-chaos/xolo:dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      chaos-provider:
+        condition: service_healthy
+    # No published port: several instances share the same internal port and
+    # the load balancer finds them through DNS. Replicate with
+    # `make up REPLICAS=n`.
+    expose:
+      - "3002"
+    # Per-instance limits. They serve two purposes: making one and n replicas
+    # comparable on a single machine, where otherwise the instances compete
+    # for the same cores instead of adding capacity; and reproducing the
+    # allocation of a serverless container, which is sized exactly this way.
+    # Removing them measures what the whole machine can absorb.
+    cpus: ${XOLO_CPUS:-0.5}
+    mem_limit: ${XOLO_MEM:-512m}
+    environment:
+      XOLO_HTTP_ADDRESS: ":3002"
+      XOLO_HTTP_BASE_URL: "http://localhost:3002"
+      XOLO_HTTP_SESSION_KEYS: "chaos-session-key-000000000000001"
+      XOLO_STORAGE_DATABASE_DSN: "postgres://xolo:xolo@postgres:5432/xolo?sslmode=disable"
+      # PostgreSQL connections are shared among the replicas: keep the product
+      # REPLICAS × MAX_OPEN_CONNS below PostgreSQL's max_connections.
+      XOLO_STORAGE_DATABASE_POOL_MAX_OPEN_CONNS: "${XOLO_DB_POOL:-40}"
+      # Must match the key used by cmd/seed: provider API keys are encrypted
+      # with it using AES-GCM.
+      XOLO_SECRET_KEY: "0e2ec2e6d5aa74c1b96c65d1b4a0f4d9ad48c6b1f3ff7a1c5f0f5f2ae4c1d3b7"
+      XOLO_PLUGINS_DIR: "/plugins"
+      # Minimum delay between two restarts of a crashed plugin. Short, so that
+      # chaos-monkey's crash_rate shows during the campaign rather than as a
+      # thirty-second outage.
+      XOLO_PLUGINS_RESTART_COOLDOWN: "${XOLO_PLUGINS_RESTART_COOLDOWN:-2s}"
+      XOLO_LOGGER_LEVEL: "${XOLO_LOGGER_LEVEL:-8}"
+    volumes:
+      # A single file mounted into the image's plugin directory, to keep the
+      # bundled plugins next to chaos-monkey.
+      - ../bin/plugins/chaos-monkey:/plugins/chaos-monkey:ro
+
+  lb:
+    image: caddy:2.8-alpine
+    depends_on:
+      - xolo
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - "3002:8080"
+      - "2019:2019"
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-remote-write-receiver
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9091:9090"
+
+  k6:
+    image: grafana/k6:1.1.0
+    profiles: ["k6"]
+    environment:
+      XOLO_URL: "http://lb:8080"
+      XOLO_TOKEN: "${XOLO_TOKEN:-xolo-e2e-alice-acme}"
+      K6_PROMETHEUS_RW_SERVER_URL: "http://prometheus:9090/api/v1/write"
+      K6_PROMETHEUS_RW_TREND_STATS: "p(50),p(95),p(99),max"
+    volumes:
+      - ../k6:/scripts:ro
+    working_dir: /scripts
+
+volumes:
+  postgres-data:
+  prometheus-data:

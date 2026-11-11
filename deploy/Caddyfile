@@ -1,0 +1,50 @@
+# Load balancer in front of the Xolo instances.
+#
+# The replicas share the `xolo` DNS name of the compose network. `dynamic a`
+# queries Docker's resolver again every two seconds, so a `--scale xolo=n` is
+# picked up without restarting the load balancer.
+
+{
+	admin :2019
+	auto_https off
+}
+
+:8080 {
+	log {
+		output stdout
+		format console
+		level ERROR
+	}
+
+	reverse_proxy {
+		dynamic a {
+			name xolo
+			port 3002
+			refresh 2s
+			resolvers 127.0.0.11
+		}
+
+		# An SSE stream must go out byte by byte: otherwise the load balancer
+		# buffers the response and the measured time to first token is wrong.
+		flush_interval -1
+
+		# Requests last as long as a full generation.
+		transport http {
+			response_header_timeout 120s
+			dial_timeout 5s
+		}
+
+		# Retry on another instance when one has just disappeared, but never a
+		# request already sent upstream.
+		lb_policy least_conn
+		lb_try_duration 5s
+		lb_try_interval 250ms
+
+		# No active probe: Xolo exposes no unauthenticated health endpoint,
+		# both /metrics and /admin/health require the platform admin role.
+		# Passive detection is the fallback, which removes an instance as soon
+		# as a connection fails. A real deployment behind a load balancer or
+		# on a serverless platform needs that endpoint; it is a gap found by
+		# the bench, not a choice.
+	}
+}

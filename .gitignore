@@ -1,0 +1,10 @@
+/bin/
+/deploy/data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+/k6/results/
+# Campaigns and their results stay local.
+/campaigns/
+__pycache__/
+*.pyc

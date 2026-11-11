@@ -1,0 +1,37 @@
+name: go
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      # go.mod resolves the plugin SDK from a Xolo checkout next to this
+      # one (see the README).
+      - uses: actions/checkout@v5
+        with:
+          path: xolo-chaos
+      - uses: actions/checkout@v5
+        with:
+          repository: xolo-gateway/xolo
+          path: xolo
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: xolo-chaos/go.mod
+          cache-dependency-path: xolo-chaos/go.sum
+
+      - name: Vet
+        working-directory: xolo-chaos
+        run: go vet ./...
+
+      - name: Test
+        working-directory: xolo-chaos
+        run: go test ./...

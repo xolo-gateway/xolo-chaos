@@ -1,0 +1,28 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  # Xolo replicas are discovered through the compose network's DNS: an A query
+  # on `xolo` returns one address per instance, each becoming a separate
+  # target. This is what makes it possible to check that the load balancer
+  # really spreads the load.
+  - job_name: xolo
+    # /metrics requires the platform admin role: the token is created by
+    # prepare-db.sql on the dataset's root account.
+    authorization:
+      type: Bearer
+      credentials: xolo-chaos-metrics
+    dns_sd_configs:
+      - names: ["xolo"]
+        type: A
+        port: 3002
+        refresh_interval: 5s
+
+  - job_name: chaos-provider
+    static_configs:
+      - targets: ["chaos-provider:9090"]
+
+  - job_name: caddy
+    static_configs:
+      - targets: ["lb:2019"]
+    metrics_path: /metrics
